@@ -110,6 +110,14 @@ struct thread {
 	bool t_did_reserve_buffers;	/* reserve_buffers() in effect */
 
 	/* add more here as needed */
+
+	struct thread *parentthread;
+	bool hasparent;
+	int returnthread;
+	int cjoin;
+	struct semaphore *joinsemaphc;
+	struct semaphore *joinsemaphp;
+	
 };
 
 /*
@@ -148,6 +156,13 @@ int thread_fork(const char *name, struct proc *proc,
                 void (*func)(void *, unsigned long),
                 void *data1, unsigned long data2);
 
+int new_thread_fork(const char *name,
+	    struct thread **thread_out,
+	    struct proc *proc,
+	    void (*entrypoint)(void *data1, unsigned long data2),
+	    void *data1, unsigned long data2);
+
+int thread_join(struct thread *thread, int *ret_out);
 /*
  * Cause the current thread to exit.
  * Interrupts need not be disabled.

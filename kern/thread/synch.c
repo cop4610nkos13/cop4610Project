@@ -35,6 +35,7 @@
 #include <types.h>
 #include <lib.h>
 #include <spinlock.h>
+#include <spl.h>
 #include <wchan.h>
 #include <thread.h>
 #include <current.h>
@@ -158,12 +159,14 @@ lock_create(const char *name)
 
         // add stuff here as needed
 	
-	lock->lwchan = wchan_create(lock->lk_name);
-	lock->isheld = 0;
-	spinlock_init(&lock->locker);
+	lock->lwchan = wchan_create(lock->lk_name);	//this will create a new wait channel
+	lock->isheld = 0;				//variable that keeps track if lock
+							//is being held at the moment
+	spinlock_init(&lock->locker);			//initializes the two spinlocks
 	spinlock_init(&lock->wc_locker);
 	
-	lock->owner = NULL;
+	lock->owner = NULL;		//sets the lock owner to null because
+				//when the lock is created noone else is going to hold it
 	
 	
 
@@ -176,8 +179,10 @@ lock_destroy(struct lock *lock)
         KASSERT(lock != NULL);
 
         // add stuff here as needed
+
+	//This function frees up the memory related to the lock
 	KASSERT(lock->owner == NULL);	//we cant destroy  lock if a thread has it
-	lock->isheld = 0;
+	lock->isheld = 0;		
 	spinlock_cleanup(&lock->locker);
 	spinlock_cleanup(&lock->wc_locker);
 	wchan_destroy(lock->lwchan);
@@ -188,18 +193,23 @@ lock_destroy(struct lock *lock)
 void
 lock_acquire(struct lock *lock)
 {
-
-	KASSERT(!lock_do_i_hold(lock));
-	spinlock_acquire(&lock->locker);
+	int spl = splhigh();
+	
+	spinlock_acquire(&lock->locker);	//acquire the spinlock
 	/* Call this before waiting for a lock */
 	HANGMAN_WAIT(&curthread->t_hangman, &lock->lk_hangman);
 
         // Write this
 	
-	while(lock->isheld == 1)
+	//this function waits for the lock to be freed
+	//it uses two spinlocks because the wait channel requires
+	//its own spinlock
+	while(lock->owner != NULL)
 	{
-		spinlock_release(&lock->locker);
+
 		spinlock_acquire(&lock->wc_locker);
+		spinlock_release(&lock->locker);
+		
 
 		wchan_sleep(lock->lwchan, &lock->wc_locker);
 		
@@ -207,36 +217,44 @@ lock_acquire(struct lock *lock)
 		spinlock_acquire(&lock->locker);
 	}
 	
-
-	lock->isheld = 1;
-	lock->owner = curthread;
+	
+	lock->isheld = 1; //this may seem redundant, but is done just in case
+	lock->owner = curthread;	//sets the lock owner to the current thread
 
 //        (void)lock;  // suppress warning until code gets written
 
 	/* Call this once the lock is acquired */
 	HANGMAN_ACQUIRE(&curthread->t_hangman, &lock->lk_hangman);
 
-	spinlock_release(&lock->locker);
+	spinlock_release(&lock->locker); //when the lock is acquire, we release the spinlock
+
+	splx(spl);
 }
 
 void
 lock_release(struct lock *lock)
 {
-	/* Call this when the lock is released */
-	//HANGMAN_RELEASE(&curthread->t_hangman, &lock->lk_hangman);
+	
 
         // Write this
-	KASSERT(lock_do_i_hold(lock));
+	KASSERT(lock_do_i_hold(lock)); //makes sure the current thread holds the lock
 
-	spinlock_acquire(&lock->locker);
-	lock->owner = NULL;
+	spinlock_acquire(&lock->locker);	//gets the spinlock
+	
 	lock->isheld = 0;
+	
+	//this section wakes up a thread in the waiting channel
+	spinlock_acquire(&lock->wc_locker);	
+	//spinlock_release(&lock->locker);
+	
 
-	spinlock_release(&lock->locker);
-	spinlock_acquire(&lock->wc_locker);
 	wchan_wakeone(lock->lwchan, &lock->wc_locker);
+
 	spinlock_release(&lock->wc_locker);
-	spinlock_acquire(&lock->locker);
+	lock->owner = NULL;			//sets owner to null
+/* Call this when the lock is released */
+	HANGMAN_RELEASE(&curthread->t_hangman, &lock->lk_hangman);
+	
 	
 	spinlock_release(&lock->locker);
 
@@ -247,21 +265,14 @@ bool
 lock_do_i_hold(struct lock *lock)
 {
         // Write this
-	bool answer;
-	spinlock_acquire(&lock->locker);
+	//if the current thread owns the lock, return true.
+	//else, it will return false
+	return lock->owner == curthread;
 
-	if (lock->owner == curthread)
-	{
-		answer = true;
-	}
-	else {
-		answer = false;
-	}
         //(void)lock;  // suppress warning until code gets written
-
-	spinlock_release(&lock->locker);
-        return answer; // dummy until code gets written
 }
+	
+       
 
 ////////////////////////////////////////////////////////////
 //
@@ -286,6 +297,10 @@ cv_create(const char *name)
 
         // add stuff here as needed
 
+	//creates a new wait channel and initializes the spinlock
+	cv->cwchan = wchan_create(cv->cv_name);
+	spinlock_init(&cv->locker);
+
         return cv;
 }
 
@@ -295,7 +310,9 @@ cv_destroy(struct cv *cv)
         KASSERT(cv != NULL);
 
         // add stuff here as needed
-
+	//cleans up the memory related to the cv
+	spinlock_cleanup(&cv->locker);
+	wchan_destroy(cv->cwchan);
         kfree(cv->cv_name);
         kfree(cv);
 }
@@ -304,22 +321,59 @@ void
 cv_wait(struct cv *cv, struct lock *lock)
 {
         // Write this
-        (void)cv;    // suppress warning until code gets written
-        (void)lock;  // suppress warning until code gets written
+	KASSERT(lock_do_i_hold(lock));
+
+	int spl = splhigh();
+	
+	//lock_acquire(lock);
+
+	lock_release(lock);
+	spinlock_acquire(&cv->locker);
+	
+	wchan_sleep(cv->cwchan, &cv->locker);
+	
+	spinlock_release(&cv->locker);
+	lock_acquire(lock);
+
+	splx(spl);
+	
+	//lock_release(lock);
+	
+       //(void)cv;    // suppress warning until code gets written
+       // (void)lock;  // suppress warning until code gets written
 }
 
 void
 cv_signal(struct cv *cv, struct lock *lock)
 {
         // Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+	KASSERT(lock_do_i_hold(lock));
+	
+	//lock_acquire(lock);
+
+	spinlock_acquire(&cv->locker);
+	wchan_wakeone(cv->cwchan, &cv->locker);
+	spinlock_release(&cv->locker);
+	
+	//lock_release(lock);
+	//(void)cv;    // suppress warning until code gets written
+	//(void)lock;  // suppress warning until code gets written
 }
 
 void
 cv_broadcast(struct cv *cv, struct lock *lock)
 {
 	// Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+	KASSERT(lock_do_i_hold(lock));
+
+	//lock_acquire(lock);
+
+	spinlock_acquire(&cv->locker);
+	wchan_wakeall(cv->cwchan, &cv->locker);
+	spinlock_release(&cv->locker);
+
+	//lock_release(lock);
+
+	//(void)cv;    // suppress warning until code gets written
+	//(void)lock;  // suppress warning until code gets written
 }

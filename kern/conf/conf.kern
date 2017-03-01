@@ -443,6 +443,7 @@ optfile synchprobs  synchprobs/elves.c
 #                                      #
 ########################################
 
+file		test/asst1_tests.c
 file		test/arraytest.c
 file		test/bitmaptest.c
 file		test/threadlisttest.c

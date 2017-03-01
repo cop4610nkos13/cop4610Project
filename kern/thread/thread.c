@@ -553,6 +553,87 @@ thread_fork(const char *name,
 	return 0;
 }
 
+int new_thread_fork(const char *name,
+	    struct thread **thread_out,
+	    struct proc *proc,
+	    void (*entrypoint)(void *data1, unsigned long data2),
+	    void *data1, unsigned long data2)
+{
+	struct thread *newthread;
+	int result;
+
+	newthread = thread_create(name);
+	if (newthread == NULL) {
+		return ENOMEM;
+	}
+
+	/* Allocate a stack */
+	newthread->t_stack = kmalloc(STACK_SIZE);
+	if (newthread->t_stack == NULL) {
+		thread_destroy(newthread);
+		return ENOMEM;
+	}
+	thread_checkstack_init(newthread);
+
+	/*
+	 * Now we clone various fields from the parent thread.
+	 */
+
+	/* Thread subsystem fields */
+	newthread->t_cpu = curthread->t_cpu;
+	if (thread_out != NULL)
+	{
+	    *thread_out = newthread;
+	    curthread->cjoin++;
+	    newthread->parentthread = curthread;
+	    newthread->hasparent = true;
+	    newthread->joinsemaphp = sem_create(name, 0);
+
+	    if (newthread->joinsemaphp == NULL)
+	    {
+		thread_destroy(newthread);
+		return -1;
+	    }
+
+	    newthread->joinsemaphc = sem_create(name, 0);
+
+	    if (newthread->joinsemaphc == NULL)
+	    {
+		thread_destroy(newthread);
+		sem_destroy(newthread->joinsemaphp);
+		return -1;
+	    }
+	}
+
+	/* Attach the new thread to its process */
+	if (proc == NULL) {
+		proc = curthread->t_proc;
+	}
+	result = proc_addthread(proc, newthread);
+	if (result) {
+		/* thread_destroy will clean up the stack */
+		thread_destroy(newthread);
+		return result;
+	}
+
+	/*
+	 * Because new threads come out holding the cpu runqueue lock
+	 * (see notes at bottom of thread_switch), we need to account
+	 * for the spllower() that will be done releasing it.
+	 */
+	newthread->t_iplhigh_count++;
+
+	/* Set up the switchframe so entrypoint() gets called */
+	switchframe_init(newthread, entrypoint, data1, data2);
+
+	/* Lock the current cpu's run queue and make the new thread runnable */
+	thread_make_runnable(newthread, false);
+
+	return 0;
+}
+
+
+
 /*
  * High level, machine-independent context switch code.
  *
@@ -787,7 +868,18 @@ thread_exit(void)
 	struct thread *cur;
 
 	cur = curthread;
+//we thought this would work, but it didnt.
+/*
 
+	if(cur->hasparent)
+	{
+		V(cur->joinsemaphc);
+		P(cur->joinsemaphp);
+
+		sem_destroy(cur->joinsemaphp);
+		sem_destroy(cur->joinsemaphc);
+	}
+*/
 	KASSERT(cur->t_did_reserve_buffers == false);
 
 	/*
@@ -806,6 +898,36 @@ thread_exit(void)
         splhigh();
 	thread_switch(S_ZOMBIE, NULL, NULL);
 	panic("braaaaaaaiiiiiiiiiiinssssss\n");
+}
+
+int thread_join(struct thread *thread, int *ret_out)
+{
+    struct thread *cur;
+    struct thread *parentthread;
+    parentthread = thread->parentthread;
+
+    KASSERT(thread != NULL);
+
+    KASSERT(parentthread != NULL);
+
+    cur = curthread;
+
+    KASSERT(thread != cur);
+
+    KASSERT(thread->joinsemaphc != NULL);
+
+    KASSERT(thread->joinsemaphp != NULL);
+
+    P(thread->joinsemaphc);
+
+    *ret_out = thread->returnthread;
+
+    cur->cjoin--;
+    thread->parentthread = NULL;
+
+    V(thread->joinsemaphp);
+
+    return 0;
 }
 
 /*

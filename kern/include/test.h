@@ -59,6 +59,13 @@ int locktest(int, char **);
 int cvtest(int, char **);
 int cvtest2(int, char **);
 
+/*our tests*/
+int testWait_cv(int nargs, char **args);
+int testSignal_cv(int nargs, char **args);
+int ourThreadTest(int nargs, char **args);
+int testBroadcast_cv(int nargs, char **args);
+int asst1_tests(int, char **);
+
 /* semaphore unit tests */
 int semu1(int, char **);
 int semu2(int, char **);

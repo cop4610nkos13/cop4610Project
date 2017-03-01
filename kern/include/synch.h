@@ -78,10 +78,10 @@ struct lock {
         HANGMAN_LOCKABLE(lk_hangman);   /* Deadlock detector hook. */
         // add what you need here
 	int isheld;
-	struct spinlock locker;
-	struct spinlock wc_locker;
-	struct wchan * lwchan;
-	volatile struct thread * owner;
+	struct spinlock locker;		//spinlock for the lock
+	struct spinlock wc_locker;	//spinlock for the wait channel
+	struct wchan * lwchan;		//wait channel for the lock
+	volatile struct thread * owner;	//thread that is going to be the owner of lock
 
 
         // (don't forget to mark things volatile as needed)
@@ -124,6 +124,8 @@ struct cv {
         char *cv_name;
         // add what you need here
         // (don't forget to mark things volatile as needed)
+	struct spinlock locker;
+	struct wchan *cwchan;
 };
 
 struct cv *cv_create(const char *name);

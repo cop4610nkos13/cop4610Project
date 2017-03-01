@@ -493,6 +493,7 @@ static const char *testmenu[] = {
 	"[sy2] Lock test             (1)     ",
 	"[sy3] CV test               (1)     ",
 	"[sy4] CV test #2            (1)     ",
+	"[a1a] ASST1 test                    ",
 	"[semu1-22] Semaphore unit tests     ",
 	"[fs1] Filesystem test               ",
 	"[fs2] FS read stress                ",
@@ -508,6 +509,7 @@ int
 cmd_testmenu(int n, char **a)
 {
 	(void)n;
+	
 	(void)a;
 
 	showmenu("OS/161 tests menu", testmenu);
@@ -595,12 +597,14 @@ static struct {
 	{ "tt1",	threadtest },
 	{ "tt2",	threadtest2 },
 	{ "tt3",	threadtest3 },
+	{ "a1a",	asst1_tests },
 	{ "sy1",	semtest },
 
 	/* synchronization assignment tests */
 	{ "sy2",	locktest },
 	{ "sy3",	cvtest },
 	{ "sy4",	cvtest2 },
+	
 #if OPT_SYNCHPROBS
     { "sp1",    elves },
     { "sp2",    airballoon },
